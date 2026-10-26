@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Launch Dashboard — Creative Technology Academy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#view">Skip to main content</a>
+
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">CT</div>
+        <div>
+          <div class="brand-name" id="brandName">Creative Technology Academy</div>
+          <div class="brand-sub">Launch command center · <span class="muted-inline">working title</span></div>
+        </div>
+      </div>
+      <nav>
+        <ul class="nav" id="nav"></ul>
+      </nav>
+      <div class="sidebar-foot">
+        <p><strong>Local storage only.</strong> Data stays in this browser on this device. Export a backup regularly.</p>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="btn btn-ghost icon-btn" id="sidebarToggle" aria-controls="sidebar" aria-expanded="true" aria-label="Toggle navigation">
+          <span class="hamburger" aria-hidden="true"></span>
+        </button>
+        <h1 class="page-title" id="pageTitle">Dashboard</h1>
+        <div class="topbar-right">
+          <span class="save-indicator" id="saveIndicator" role="status" aria-live="polite">Saved locally</span>
+          <button class="btn btn-ghost" id="printBtn" type="button">Print view</button>
+        </div>
+      </header>
+      <div id="banner" class="banner" hidden role="alert"></div>
+      <main id="view" class="view" tabindex="-1"></main>
+      <footer class="app-foot">
+        <span>Last updated: <span id="lastUpdated">—</span></span>
+        <span>Data is saved in this browser only (localStorage). Clearing browser data erases it — use Settings &amp; Backup to export.</span>
+      </footer>
+    </div>
+  </div>
+
+  <dialog id="modal" class="modal" aria-labelledby="modalTitle">
+    <form method="dialog" class="modal-inner" id="modalForm" novalidate>
+      <header class="modal-head">
+        <h2 id="modalTitle">Dialog</h2>
+        <button class="btn btn-ghost icon-btn" type="button" id="modalClose" aria-label="Close dialog">✕</button>
+      </header>
+      <div class="modal-body" id="modalBody"></div>
+      <footer class="modal-foot" id="modalFoot"></footer>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="printArea" class="print-area" aria-hidden="true"></div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
