@@ -19,6 +19,8 @@ No install, server, account, or internet connection is needed. Internet is only 
 
 ## Major features
 
+- **Vendor Fast Track (default home, simple mode):** the 14 steps Heartland actually requires, read from its official Become a Vendor and FAQ pages on Oct 26, 2026. They're grouped into Apply, After approval, and Go live, with a 120-day countdown once you submit. Everything else is optional; use the **Show full planner** button at the bottom of the sidebar to open it.
+
 - **Dashboard:** launch % (required tasks only), completed/remaining/blocked/overdue/in-progress/awaiting-approval counts, a "What should I do next?" panel, the top 5 next actions, 10 readiness indicators, phase progress, deadlines, and a financial summary.
 - **Master Checklist:** 186 seeded tasks across 11 phases. You can search them, filter by phase, category, priority, status, required/optional, and evidence label, and sort by deadline, priority, or effort. There are toggles for incomplete-only, blocked, and overdue tasks, plus inline status changes, expandable details, and add/edit/delete.
 - **Work in any order (default):** prerequisites are shown as "Suggested after …", not locks. You can check off any task at any time, and the app notes it in the task history. **Ready now** (dashboard card, metric, and checklist toggle) lists everything whose prerequisites are done, so you can work across phases at the same time. Sort by **Recommended order** to go step by step. If you want hard locks, switch Settings → Dependency mode to **Strict**: completing a task early then needs a reason, which is recorded.

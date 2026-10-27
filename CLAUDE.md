@@ -62,10 +62,14 @@ When official sources conflict, flag the conflict and recommend contacting Heart
 - Don't recommend expensive software, space, equipment, or branding without a clear reason.
 - Record confirmed decisions below with date and evidence label.
 
+## Verified vendor requirements (from official pages, read 2026-10-26; pages undated)
+Apply: public website, electronic list of services (monthly rates), résumé/qualifications, online application. After approval: W-9, DOJ background verification form, mandated reporter training form, GL COI ($2M aggregate / $1M occurrence / $500K personal & advertising injury, Heartland additional insured), business license or exemption letter, photo ID. Then e-sign agreement → catalog. All steps within 120 days. Open questions for vendors@heartlandcharterschool.com: course eligibility, group classes, rate limits.
+
 ## Decision & milestone log
 | Date | Decision / milestone | Label | Evidence |
 |---|---|---|---|
+| 2026-10-26 | Dashboard published on GitHub Pages: https://palmtreefeen.github.io/cta-launch-dashboard/ (repo palmtreefeen/cta-launch-dashboard, public) | USER CONFIRMED | Files committed by Carlos; live page checked |
 | 2026-10-26 | Dashboard v1 built (186 tasks, 11 phases) | Built — awaiting Carlos's review | Acceptance tests 31/31 passed |
 
 ## Current next action
-**P2-01 — Read the official Heartland "Become a Vendor" instructions** and record each requirement with its source and date. Then send the vendor inquiry email (P2-04), which is drafted in the dashboard's Documents section.
+Dashboard now opens in simple mode (Vendor Fast Track, tasks V-01–V-14). **P2-01 — Read the official Heartland "Become a Vendor" instructions** and record each requirement with its source and date. Then send the vendor inquiry email (P2-04), which is drafted in the dashboard's Documents section.

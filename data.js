@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var SEED_VERSION = 1;
+  var SEED_VERSION = 2;
 
   var CATEGORIES = {
     FORM: 'Business Formation & Administration',
@@ -20,6 +20,7 @@
   };
 
   var PHASES = {
+    P0: 'Vendor Fast Track · the actual Heartland requirements',
     P1: 'Phase 1 · Business Model & Market Research',
     P2: 'Phase 2 · Heartland Vendor Application',
     P3: 'Phase 3 · Business Registration & Tax Administration',
@@ -74,6 +75,61 @@
   function T(id, title, pri, req, eff, deps, cat, ver, res, ins, crit, extra) {
     rows.push(Object.assign({ id: id, title: title, priority: pri, required: req, effort: eff, deps: deps || [], category: CATEGORIES[cat], verification: V[ver], resource: res ? U[res] : '', instructions: ins, criteria: crit }, extra || {}));
   }
+
+  /* ---------------- VENDOR FAST TRACK (P0) ----------------
+     Requirements below were read from Heartland's official "Become a Vendor" and FAQ pages on 2026-10-26.
+     The pages show no "last updated" date, so confirm anything important with vendors@heartlandcharterschool.com. */
+  var VSRC = 'Heartland "Become a Vendor" page (read 2026-10-26; page shows no update date)';
+  var VFAQ = 'Heartland Vendor FAQs page (read 2026-10-26; page shows no update date)';
+  function VT(id, stage, title, pri, eff, ins, crit, ver, res, src, extra) {
+    T(id, title, pri, true, eff, [], 'HEART', ver, res, ins, crit, Object.assign({ phase: 'P0', stage: stage, verifiedDate: ver === 'VER' ? '2026-10-26' : '', verifiedSource: ver === 'VER' ? src : '' }, extra || {}));
+  }
+  VT('V-01', 1, 'Email Heartland your open questions', 'Critical', 0.5,
+    'The official pages don\'t answer these, so ask before you invest money: (1) Do audio engineering / music production and app development / coding courses qualify? (2) Are small-group classes allowed, and how should group pricing be listed? (3) Are there limits on vendor rates? Use the "Vendor inquiry email" template in Documents and send it from your own email to vendors@heartlandcharterschool.com. Log the reply in the Contact log.',
+    'Email sent and logged; answers recorded when they arrive.', 'INTERNAL', 'HL_CONTACT', '');
+  VT('V-02', 1, 'Put up a simple public website', 'Critical', 4,
+    'Required at application: a public website where families can learn about your services and contact you. One page is enough to start: who you are, what students make, the courses, and a contact form/email. State honestly that Heartland approval is pending.',
+    'Website is live at a public URL with services and contact info.', 'VER', 'HL_BECOME', VSRC);
+  VT('V-03', 1, 'Write your list of services with monthly prices', 'Critical', 2,
+    'Required at application: an electronic list of all services (Heartland calls it the Detailed List of Services) for the ordering catalog. Approval is one month at a time, so price semester or year programs as monthly rates. Students can only order services/rates that are in the catalog. Pick 2–4 launch courses from the Course Catalog.',
+    'Service list with a monthly rate for each course is ready to submit.', 'VER', 'HL_BECOME', VSRC);
+  VT('V-04', 1, 'Update your résumé and qualifications', 'High', 2,
+    'Required at application: a résumé and information on your qualifications for the services you offer (audio engineering, music production, software development). Only real, verifiable experience. Optional extras Heartland mentions: teaching credential number, and a 60-second video for families.',
+    'Résumé file ready to upload.', 'VER', 'HL_BECOME', VSRC);
+  VT('V-05', 1, 'Submit the online vendor application', 'Critical', 1,
+    'Complete the application form linked on Heartland\'s "Become a Vendor" page (Service Vendor). IMPORTANT: every step must be finished within 120 days (4 months) or the application expires — the dashboard starts a countdown from the date you mark this complete.',
+    'You personally submitted the application.', 'VER', 'HL_BECOME', VSRC,
+    { gate: ['I personally submitted the vendor application through Heartland\'s official form.'] });
+  VT('V-06', 2, 'Receive the approval email from Heartland', 'Critical', 0,
+    'Wait for the director\'s approval. The Vendor Department emails you, then sends the specific forms and links for the documents below. If you hear nothing for a couple of weeks, follow up (log it in the Contact log).',
+    'Approval email received.', 'VER', 'HL_BECOME', VSRC,
+    { gate: ['I received an email from Heartland\'s Vendor Department approving my application.'] });
+  VT('V-07', 2, 'W-9 with your business address', 'High', 0.5,
+    'Fill out a W-9 with your business address. Heartland sends a 1099 at year end. Do not store your tax ID in this app.',
+    'W-9 sent to Heartland.', 'VER', 'IRS_W9', VSRC);
+  VT('V-08', 2, 'California DOJ background check + Heartland form', 'High', 3,
+    'Heartland\'s Background Verification form confirms DOJ background checks (names and dates) for anyone with potential student access. Ask Heartland which Live Scan form/agency to use before paying for one.',
+    'Background check completed and Heartland form submitted.', 'VER', 'DOJ', VSRC);
+  VT('V-09', 2, 'Mandated reporter training + Heartland form', 'High', 3,
+    'Annual mandated reporter training for you (and any staff/volunteers), confirmed on Heartland\'s form. Ask which course they accept if unsure.',
+    'Training done and form submitted.', 'VER', 'MANDREP', VSRC);
+  VT('V-10', 2, 'General liability insurance certificate', 'High', 2,
+    'Certificate of insurance with: $2,000,000 general aggregate, $1,000,000 per occurrence, $500,000 personal & advertising injury, and Heartland Charter School named as additional insured. Show these exact numbers to an insurance agent when getting quotes.',
+    'Certificate meeting these limits sent to Heartland.', 'VER', 'CDI', VSRC);
+  VT('V-11', 2, 'Business license — or a letter explaining you\'re exempt', 'High', 1,
+    'Provide your local business license if your city/county requires one, or a letter explaining why you are exempt. For a City of Santa Barbara address, check the City\'s business tax certificate rules; unincorporated areas follow County rules.',
+    'License copy or exemption letter sent.', 'VER', 'CITY', VSRC);
+  VT('V-12', 2, 'Photo ID of the person signing', 'Medium', 0.25,
+    'A photo ID of whoever will sign the Vendor Agreement. Send it only through the channel Heartland gives you — never store it in this app.',
+    'ID submitted through Heartland\'s process.', 'VER', '', VSRC);
+  VT('V-13', 3, 'E-sign the Vendor / Community Partner Agreement', 'Critical', 1,
+    'Heartland emails the agreement for e-signature; then the director signs. Timing: vendors start on the 1st of a month, and the approved application, approved documents and signed agreement must all be in by the 20th of the month before.',
+    'Agreement signed by you.', 'VER', 'HL_FAQ', VFAQ,
+    { gate: ['I signed the Vendor/Community Partner Agreement myself.'] });
+  VT('V-14', 3, 'Confirm you\'re live in the Heartland catalog', 'High', 0.25,
+    'After both signatures you\'re added to the catalog. Check your listing and prices. From here: families order → you receive a certificate (PO) before teaching → teach → invoice after → paid about 30 days later. Heartland doesn\'t advertise vendors — you promote yourself.',
+    'Your services appear correctly in the ordering catalog.', 'VER', 'HL_FAQ', VFAQ,
+    { gate: ['I confirmed my business and services appear in Heartland\'s ordering catalog.'] });
 
   /* ---------------- PHASE 1 ---------------- */
   T('P1-01', 'Define the business concept and target market', 'Critical', true, 2, [], 'FORM', 'INTERNAL', '',

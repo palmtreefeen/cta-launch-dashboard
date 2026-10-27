@@ -39,9 +39,9 @@
   /* ===================== State ===================== */
   function seedTask(t, i) {
     return {
-      id: t.id, phase: t.id.split('-')[0], order: i, title: t.title, instructions: t.instructions || '', category: t.category,
+      id: t.id, phase: t.phase || t.id.split('-')[0], stage: t.stage || null, order: i, title: t.title, instructions: t.instructions || '', category: t.category,
       priority: t.priority, status: 'Not Started', required: !!t.required, effort: t.effort, actualTime: '', target: '', completedDate: '',
-      deps: (t.deps || []).slice(), notes: t.notes || '', resource: t.resource || '', verification: t.verification, verifiedDate: '', verifiedSource: '',
+      deps: (t.deps || []).slice(), notes: t.notes || '', resource: t.resource || '', verification: t.verification, verifiedDate: t.verifiedDate || '', verifiedSource: t.verifiedSource || '',
       evidenceVerified: false, criteria: t.criteria || '', gate: t.gate || null, milestone: !!t.milestone, seed: true, depOverride: null, overrides: [], history: []
     };
   }
@@ -61,7 +61,7 @@
     var t = nowIso();
     return {
       app: 'cta-launch-dashboard', version: DATA_VERSION, seedVersion: SEED.version, created: t, lastUpdated: t,
-      settings: { businessName: 'Creative Technology Academy', ownerName: '', depMode: 'flexible', guideSeen: false },
+      settings: { businessName: 'Creative Technology Academy', ownerName: '', depMode: 'flexible', guideSeen: false, simple: true },
       tasks: SEED.tasks.map(seedTask), deletedSeedIds: [],
       courses: clone(SEED.courses), lessonTemplates: clone(SEED.lessonTemplates),
       finance: { startupBudget: '', startupExpenses: '', revenueTarget: '', actualRevenue: '', opExpenses: '', students: '', activeCourses: '' },
@@ -98,7 +98,7 @@
     d.tasks.forEach(function (t, i) {
       Object.keys(blank).forEach(function (k) { if (t[k] === undefined) t[k] = clone(blank[k]); });
       if (!t.phase) t.phase = t.id.split('-')[0];
-      if (seedById[t.id]) { t.order = seedById[t.id].i; if (!t.gate && seedById[t.id].t.gate) t.gate = seedById[t.id].t.gate; }
+      if (seedById[t.id]) { t.order = seedById[t.id].i; if (!t.gate && seedById[t.id].t.gate) t.gate = seedById[t.id].t.gate; if (!t.stage && seedById[t.id].t.stage) t.stage = seedById[t.id].t.stage; if (seedById[t.id].t.phase) t.phase = seedById[t.id].t.phase; }
       else if (typeof t.order !== 'number') t.order = 1000 + i;
       if (!Array.isArray(t.deps)) t.deps = [];
     });
@@ -557,12 +557,15 @@
   ];
   var current = 'dashboard';
 
+  var NAV_SIMPLE = [['dashboard', 'Vendor Fast Track'], ['documents', 'Email & document templates'], ['comms', 'Contact log & notes'], ['guide', 'Guide'], ['settings', 'Settings & Backup']];
+  function isSimple() { return state.settings.simple !== false; }
+  function navList() { return isSimple() ? NAV_SIMPLE : NAV; }
   function renderNav() {
-    $('#nav').innerHTML = NAV.map(function (n) {
+    $('#nav').innerHTML = navList().map(function (n) {
       var count = '';
       if (n[2]) { var open = state.tasks.filter(function (t) { return n[2].indexOf(t.phase) >= 0 && !isDone(t); }).length; count = '<span class="nav-count" aria-label="' + open + ' open tasks">' + open + '</span>'; }
       return '<li><a href="#' + n[0] + '"' + (n[0] === current ? ' aria-current="page"' : '') + '><span>' + esc(n[1]) + '</span>' + count + '</a></li>';
-    }).join('');
+    }).join('') + '<li style="margin-top:.75rem;border-top:1px solid #222c41;padding-top:.6rem"><button class="btn btn-sm nav-mode" data-action="toggle-simple">' + (isSimple() ? 'Show full planner (optional)' : '← Back to simple Fast Track') + '</button></li>';
   }
 
   function bar(p, cls) { return '<div class="bar ' + (cls || '') + '" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + Math.round(p * 100) + '"><span style="width:' + (p * 100).toFixed(1) + '%"></span></div>'; }
@@ -591,7 +594,51 @@
       }).join('') : '<div class="empty"><strong>Nothing is ready right now.</strong>Check tasks marked Waiting or Blocked.</div>') + '</div>';
   }
 
+  /* ---------- Vendor Fast Track (simple mode home) ---------- */
+  function addDays(d, n) { var x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + n); return x.getFullYear() + '-' + pad(x.getMonth() + 1) + '-' + pad(x.getDate()); }
+  function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000); }
+  function viewFastTrack(el) {
+    var vt = state.tasks.filter(function (t) { return t.phase === 'P0'; }).sort(sortDefault);
+    if (!vt.length) { el.innerHTML = '<div class="empty"><strong>Fast Track steps are missing.</strong>Settings & Backup → Restore deleted default tasks.</div>'; return; }
+    var done = vt.filter(isDone).length, next = vt.find(function (t) { return !isDone(t); });
+    var sub = getTask('V-05'), signed = getTask('V-13');
+    var clock = '';
+    if (sub && isDone(sub) && sub.completedDate && !(signed && isDone(signed))) {
+      var dl = addDays(sub.completedDate, 120), left = daysBetween(today(), dl);
+      clock = '<div class="note ' + (left < 30 ? 'warn' : 'info') + '"><strong>120-day clock:</strong> application submitted ' + fmtDate(sub.completedDate) + '. Finish every step by <strong>' + fmtDate(dl) + '</strong> (' + (left >= 0 ? left + ' days left' : 'deadline passed — contact Heartland') + ').</div>';
+    }
+    var stages = [[1, 'Step 1 · Apply', 'What Heartland needs with your application.'], [2, 'Step 2 · After approval: send documents', 'Heartland emails you the forms and links for these once your application is approved.'], [3, 'Step 3 · Sign and go live', '']];
+    var row = function (t) {
+      return '<li class="ft-row' + (isDone(t) ? ' is-done' : '') + (next && t.id === next.id ? ' is-next' : '') + '"><label class="check-row" style="margin:0;align-items:flex-start;flex:1"><input type="checkbox" data-action="toggle" data-id="' + esc(t.id) + '"' + (isDone(t) ? ' checked' : '') + ' aria-label="Complete: ' + esc(t.title) + '"><span><strong class="ft-title">' + esc(t.title) + '</strong>' + (next && t.id === next.id ? ' <span class="badge b-progress">Next</span>' : '') + (t.gate ? ' <span class="badge b-optional" title="Asks you to confirm before checking off">Confirm</span>' : '') + '<span class="ft-ins">' + esc(t.instructions) + '</span>' + (isDone(t) && t.completedDate ? '<span class="small muted">Done ' + fmtDate(t.completedDate) + '</span>' : '') + '</span></label>' +
+        '<div class="btn-row ft-actions">' + (t.id === 'V-01' ? '<button class="btn btn-sm" data-action="new-doc-type" data-type="Vendor inquiry email">Draft email</button>' : '') + (t.resource ? '<a class="btn btn-sm" href="' + esc(t.resource) + '" target="_blank" rel="noopener noreferrer">Open link ↗</a>' : '') + '<button class="btn btn-sm btn-ghost" data-action="open-task" data-id="' + esc(t.id) + '">Notes</button></div></li>';
+    };
+    el.innerHTML = '<div class="ft">' +
+      '<div class="card next-hero"><div class="kicker">Become a Heartland vendor</div><h2>' + vt.length + ' steps. That\'s it.</h2>' +
+      '<p>These are the actual requirements from Heartland\'s official vendor pages. Do step 1 now. Step 2 starts when Heartland approves you.</p>' +
+      '<div class="row small" style="display:flex;justify-content:space-between"><span><strong>' + done + ' of ' + vt.length + '</strong> done</span><span>' + pct(done / vt.length) + '</span></div>' + bar(done / vt.length, done === vt.length ? 'ok' : '') +
+      (next ? '<p style="margin:.75rem 0 0"><strong>Next:</strong> ' + esc(next.title) + '</p>' : '<p style="margin:.75rem 0 0"><strong>You\'re a Heartland vendor.</strong> Next: your first student. See the full planner → Student Enrollment.</p>') + '</div>' + clock +
+      stages.map(function (st) {
+        var items = vt.filter(function (t) { return (t.stage || 1) === st[0]; });
+        if (!items.length) return '';
+        var d = items.filter(isDone).length;
+        return '<section class="card"><div class="card-head"><h2>' + esc(st[1]) + '</h2><span class="badge ' + (d === items.length ? 'b-complete' : '') + '">' + d + '/' + items.length + '</span></div>' + (st[2] ? '<p class="small muted">' + esc(st[2]) + '</p>' : '') + '<ul class="ft-list">' + items.map(row).join('') + '</ul></section>';
+      }).join('') +
+      '<details class="card"><summary style="cursor:pointer;font-weight:650">Key facts from Heartland\'s official pages</summary><ul class="small" style="margin-top:.6rem">' +
+        '<li>Santa Barbara County is one of Heartland\'s staffed counties.</li>' +
+        '<li>Online and in-person service vendors go through the same onboarding and documents.</li>' +
+        '<li>Every step must be completed within <strong>120 days</strong> of applying, or the application expires.</li>' +
+        '<li>Services are approved <strong>one month at a time</strong>. Price longer programs as monthly rates.</li>' +
+        '<li>Never teach before you receive the student\'s certificate (PO). Invoice after teaching; payment comes about 30 days later.</li>' +
+        '<li>Vendors start on the 1st of a month. Everything must be signed by the 20th of the month before. Expect at least a couple of months.</li>' +
+        '<li>Heartland doesn\'t promote vendors. Marketing is up to you.</li>' +
+        '<li>Contact: vendors@heartlandcharterschool.com · (661) 360-6516</li></ul>' +
+        '<p class="small muted">Read from the official ' + '<a href="' + esc(SEED.resources[1].url) + '" target="_blank" rel="noopener noreferrer">Become a Vendor</a> and <a href="' + esc(SEED.resources[2].url) + '" target="_blank" rel="noopener noreferrer">FAQ</a> pages on Oct 26, 2026. The pages show no update date, so confirm anything important by email.</p></details>' +
+      '<div class="card"><h2>What about everything else?</h2><p class="small">The full planner (pricing models, marketing, operations, course building and more) is <strong>optional</strong>. None of it is required to become a vendor. Open it when it\'s useful.</p><button class="btn" data-action="toggle-simple">Show full planner</button></div>' +
+      '</div>';
+  }
+
   function viewDashboard(el) {
+    if (isSimple()) return viewFastTrack(el);
     var s = stats(), next = nextActions(5), top = next[0], m = taskMap(), fc = financeCalc(), f = state.finance;
     var heroNext;
     if (top) {
@@ -998,6 +1045,7 @@
 
   /* ---------- Guide ---------- */
   var GUIDE_SECTIONS = [
+    ['g-fast', 'Simple mode: the Vendor Fast Track'],
     ['g-start', 'Start here: your first 15 minutes'],
     ['g-daily', 'Your weekly routine'],
     ['g-order', 'Order vs. doing things in parallel'],
@@ -1019,9 +1067,15 @@
     el.innerHTML = '<div class="guide">' +
       '<div class="card next-hero"><div class="kicker">How to use this dashboard</div><h2>One place to go from idea to first paid student</h2>' +
       '<p>This dashboard holds every step for launching your creative technology courses and getting approved as a Heartland vendor, from setting up the business to receiving your first payment. Right now you have <strong>' + s.remaining + ' required tasks</strong> left and <strong>' + s.ready + ' ready to start</strong>.</p>' +
-      '<p class="small muted" style="margin:0">Short version: open the <a href="#dashboard">Dashboard</a>, do what "What should I do next?" says (or anything in "Ready now"), check it off, and repeat. Everything saves automatically.</p></div>' +
+      '<p class="small muted" style="margin:0">Short version: open the <a href="#dashboard">' + (isSimple() ? 'Vendor Fast Track' : 'Dashboard') + '</a>, do the step marked <strong>Next</strong>, check it off, and repeat. Everything saves automatically.</p></div>' +
       '<nav class="card" aria-label="Guide contents" id="g-toc"><h2>Contents</h2><ol class="guide-toc">' + GUIDE_SECTIONS.map(function (g) { return '<li><button class="btn btn-ghost btn-sm" data-action="guide-jump" data-target="' + g[0] + '">' + esc(g[1]) + '</button></li>'; }).join('') + '</ol></nav>' +
 
+      sec('g-fast', 'Simple mode: the Vendor Fast Track', '<p>The app opens in <strong>simple mode</strong>. Your home page is the <a href="#dashboard">Vendor Fast Track</a>: just the 14 steps Heartland actually requires, in 3 stages.</p><ol class="guide-steps">' +
+        '<li><strong>Step 1 · Apply:</strong> email your questions, put up a simple website, write your service list with monthly prices, update your résumé, submit the application.</li>' +
+        '<li><strong>Step 2 · After approval:</strong> W-9, DOJ background check, mandated reporter training, liability insurance certificate, business license (or exemption letter), photo ID.</li>' +
+        '<li><strong>Step 3 · Go live:</strong> sign the agreement and confirm you\'re in the catalog.</li></ol>' +
+        '<p>The step marked <span class="badge b-progress">Next</span> is the one to do now. When you mark "Submit the online vendor application" complete, a <strong>120-day countdown</strong> appears, because Heartland requires every step to be finished within 120 days.</p>' +
+        '<p class="small">The full planner (186 more tasks for pricing, marketing, operations and growth) is optional. Use the button at the bottom of the sidebar to switch between the simple view and the full planner. Your progress is the same either way. The rest of this guide mostly describes the full planner.</p>') +
       sec('g-start', 'Start here: your first 15 minutes', '<ol class="guide-steps">' +
         '<li><strong>Bookmark this page.</strong> Your progress lives in this browser on this device (see "Saving, backups, and devices").</li>' +
         '<li><strong>Set your details.</strong> In ' + go('settings', 'Settings & Backup') + ', change the business name if you have one. "Creative Technology Academy" is only a working title.</li>' +
@@ -1195,7 +1249,7 @@
     VIEWS[current](view);
     if (current === 'pricing') updatePricing();
     renderNav();
-    var n = NAV.find(function (x) { return x[0] === current; });
+    var n = navList().find(function (x) { return x[0] === current; }) || NAV.find(function (x) { return x[0] === current; });
     $('#pageTitle').textContent = n ? n[1] : '';
     document.title = (n ? n[1] + ' · ' : '') + 'Launch Dashboard — ' + state.settings.businessName;
     $('#brandName').textContent = state.settings.businessName || 'Launch Dashboard';
@@ -1235,6 +1289,7 @@
       case 'print-checklist': printChecklist(); break;
       case 'guide-jump': var gt = document.getElementById(el.dataset.target); if (gt) { gt.scrollIntoView({ behavior: 'smooth', block: 'start' }); gt.focus({ preventScroll: true }); } break;
       case 'guide-top': var toc = document.getElementById('g-toc'); if (toc) toc.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
+      case 'toggle-simple': state.settings.simple = !isSimple(); save(); go('dashboard'); toast(isSimple() ? 'Simple Fast Track view' : 'Full planner shown'); break;
       case 'dismiss-welcome': state.settings.guideSeen = true; save(); render(); break;
       case 'print-dashboard': go('dashboard'); setTimeout(function () { window.print(); }, 100); break;
       case 'select-course': ui.course = +el.dataset.i; render(); break;
