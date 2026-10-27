@@ -61,7 +61,7 @@
     var t = nowIso();
     return {
       app: 'cta-launch-dashboard', version: DATA_VERSION, seedVersion: SEED.version, created: t, lastUpdated: t,
-      settings: { businessName: 'Creative Technology Academy', ownerName: '' },
+      settings: { businessName: 'Creative Technology Academy', ownerName: '', depMode: 'flexible', guideSeen: false },
       tasks: SEED.tasks.map(seedTask), deletedSeedIds: [],
       courses: clone(SEED.courses), lessonTemplates: clone(SEED.lessonTemplates),
       finance: { startupBudget: '', startupExpenses: '', revenueTarget: '', actualRevenue: '', opExpenses: '', students: '', activeCourses: '' },
@@ -147,7 +147,21 @@
   function getTask(id) { for (var i = 0; i < state.tasks.length; i++) if (state.tasks[i].id === id) return state.tasks[i]; return null; }
   function isDone(t) { return t.status === 'Complete'; }
   function incompleteDeps(t, m) { m = m || taskMap(); return t.deps.map(function (id) { return m[id]; }).filter(function (d) { return d && !isDone(d); }); }
-  function depBlocked(t, m) { return !isDone(t) && !t.depOverride && incompleteDeps(t, m).length > 0; }
+  function strictMode() { return state.settings.depMode === 'strict'; }
+  function depsPending(t, m) { return !isDone(t) && !t.depOverride && incompleteDeps(t, m).length > 0; }
+  function depBlocked(t, m) { return strictMode() && depsPending(t, m); }
+  function isReady(t, m) { return !isDone(t) && t.status !== 'Waiting' && t.status !== 'Blocked' && !depsPending(t, m); }
+  function depthMap() {
+    var m = taskMap(), memo = {};
+    function d(id, seen) { if (memo[id] != null) return memo[id]; var t = m[id]; if (!t || seen[id]) return 0; seen[id] = true; var v = t.deps.reduce(function (mx, x) { return Math.max(mx, 1 + d(x, seen)); }, 0); seen[id] = false; memo[id] = v; return v; }
+    state.tasks.forEach(function (t) { d(t.id, {}); }); return memo;
+  }
+  function sortRecommended(list) {
+    var m = taskMap(), dm = depthMap();
+    return list.sort(function (a, b) {
+      return (isDone(a) - isDone(b)) || ((isReady(b, m) ? 1 : 0) - (isReady(a, m) ? 1 : 0)) || (b.required - a.required) || (dm[a.id] - dm[b.id]) || (PRI_RANK[a.priority] - PRI_RANK[b.priority]) || sortDefault(a, b);
+    });
+  }
   function isBlocked(t, m) { return !isDone(t) && (t.status === 'Blocked' || depBlocked(t, m)); }
   function isOverdue(t) { return !isDone(t) && t.target && t.target < today(); }
   function unblocksCount(id) { return state.tasks.filter(function (t) { return !isDone(t) && t.deps.indexOf(id) >= 0; }).length; }
@@ -165,7 +179,8 @@
       blocked: open.filter(function (t) { return isBlocked(t, m); }).length,
       overdue: open.filter(isOverdue).length,
       inProgress: open.filter(function (t) { return t.status === 'In Progress'; }).length,
-      waiting: open.filter(function (t) { return t.status === 'Waiting'; }).length
+      waiting: open.filter(function (t) { return t.status === 'Waiting'; }).length,
+      ready: open.filter(function (t) { return isReady(t, m); }).length
     };
   }
   function groupProgress(filterFn) {
@@ -177,9 +192,9 @@
   function nextActions(n) {
     var m = taskMap(), t0 = today();
     var cand = state.tasks.filter(function (t) { return !isDone(t) && t.status !== 'Waiting' && t.status !== 'Blocked' && !depBlocked(t, m); });
-    var unb = {}; cand.forEach(function (t) { unb[t.id] = unblocksCount(t.id); });
+    var unb = {}, rdy = {}; cand.forEach(function (t) { unb[t.id] = unblocksCount(t.id); rdy[t.id] = isReady(t, m) ? 1 : 0; });
     cand.sort(function (a, b) {
-      return (b.required - a.required) || (PRI_RANK[a.priority] - PRI_RANK[b.priority]) ||
+      return (b.required - a.required) || (rdy[b.id] - rdy[a.id]) || (PRI_RANK[a.priority] - PRI_RANK[b.priority]) ||
         ((isOverdue(b) ? 1 : 0) - (isOverdue(a) ? 1 : 0)) || (unb[b.id] - unb[a.id]) ||
         ((a.target || '9999') < (b.target || '9999') ? -1 : (a.target || '9999') > (b.target || '9999') ? 1 : 0) ||
         (a.status === 'In Progress' ? -1 : 0) - (b.status === 'In Progress' ? -1 : 0) || sortDefault(a, b);
@@ -190,6 +205,7 @@
       if (isOverdue(t)) why.push('overdue since ' + fmtDate(t.target)); else if (t.target) why.push('due ' + fmtDate(t.target));
       if (t.status === 'In Progress') why.push('already in progress');
       if (!t.required) why.push('optional');
+      if (!rdy[t.id]) why.push('suggested prerequisites not done yet');
       return { t: t, why: why.join(' · ') };
     });
   }
@@ -301,20 +317,25 @@
     var inc = incompleteDeps(t);
     var override = null;
     var p = Promise.resolve({ ok: true });
-    if (inc.length && !t.depOverride) {
+    if (inc.length && !t.depOverride && !strictMode()) {
+      p = Promise.resolve({ ok: true, early: inc.map(function (d) { return d.id; }) });
+    } else if (inc.length && !t.depOverride) {
       p = confirmDialog({
         title: 'Prerequisites are not complete',
         message: '<strong>' + esc(t.id + ' — ' + t.title) + '</strong> depends on tasks that are not complete:</p><ul>' + inc.map(function (d) { return '<li>' + esc(d.id + ' — ' + d.title) + '</li>'; }).join('') + '</ul><p>You can override the dependency. The override and your reason will be recorded on the task.',
         confirmLabel: 'Override and continue', requireReason: true
       }).then(function (r) { if (r.ok) override = { at: nowIso(), deps: inc.map(function (d) { return d.id; }), reason: r.reason }; return r; });
     }
+    var early = null;
     return p.then(function (r) {
       if (!r.ok) return { ok: false };
+      if (r.early) early = r.early;
       if (t.gate && t.gate.length) return gateDialog(t);
       return { ok: true };
     }).then(function (g) {
       if (!g.ok) { render(); return false; }
       if (override) { t.depOverride = override; t.overrides.push(override); hist(t, 'Dependency override (' + override.deps.join(', ') + '): ' + override.reason); }
+      if (early) hist(t, 'Completed before suggested prerequisites: ' + early.join(', '));
       t.status = 'Complete'; t.completedDate = today();
       hist(t, 'Marked complete' + (g.evidence ? ' — evidence: ' + g.evidence : ''));
       if (g.evidence) t.notes = (t.notes ? t.notes + '\n' : '') + '[' + today() + '] Completion evidence: ' + g.evidence;
@@ -443,7 +464,7 @@
     var inc = incompleteDeps(t, m);
     var actions = '<div class="btn-row">' +
       (isDone(t) ? '<button class="btn btn-sm" data-action="reopen" data-id="' + esc(t.id) + '">Reopen task</button>' : '<button class="btn btn-sm btn-primary" data-action="complete" data-id="' + esc(t.id) + '">Mark complete</button>') +
-      (!isDone(t) && inc.length && !t.depOverride ? '<button class="btn btn-sm" data-action="override" data-id="' + esc(t.id) + '">Override dependencies…</button>' : '') +
+      (strictMode() && !isDone(t) && inc.length && !t.depOverride ? '<button class="btn btn-sm" data-action="override" data-id="' + esc(t.id) + '">Override dependencies…</button>' : '') +
       (t.depOverride ? '<button class="btn btn-sm" data-action="remove-override" data-id="' + esc(t.id) + '">Remove override</button>' : '') +
       '<button class="btn btn-sm" data-action="edit-task" data-id="' + esc(t.id) + '">Edit</button>' +
       (t.resource ? '<a class="btn btn-sm" href="' + esc(t.resource) + '" target="_blank" rel="noopener noreferrer">Open resource ↗</a>' : '') +
@@ -467,13 +488,13 @@
   }
 
   /* ===================== Task table ===================== */
-  var ui = { expanded: {}, filters: { q: '', phase: '', category: '', priority: '', status: '', req: 'all', verification: '', incompleteOnly: false, blockedOnly: false, overdueOnly: false, sort: 'default' }, course: 0, doc: null };
+  var ui = { expanded: {}, filters: { q: '', phase: '', category: '', priority: '', status: '', req: 'all', verification: '', incompleteOnly: false, blockedOnly: false, readyOnly: false, overdueOnly: false, sort: 'default' }, course: 0, doc: null };
 
   function taskRow(t, m, o) {
     var inc = incompleteDeps(t, m), done = isDone(t), overdue = isOverdue(t), dblock = depBlocked(t, m);
     var badges = (t.milestone ? '<span class="badge b-progress">Milestone</span>' : '') + (t.required ? '' : '<span class="badge b-optional">Optional</span>') +
       (overdue ? '<span class="badge b-overdue">Overdue</span>' : '') +
-      (dblock ? '<span class="badge b-blocked" title="Complete prerequisites first">Blocked by ' + esc(inc.map(function (d) { return d.id; }).join(', ')) + '</span>' : '') +
+      (dblock ? '<span class="badge b-blocked" title="Complete prerequisites first">Blocked by ' + esc(inc.map(function (d) { return d.id; }).join(', ')) + '</span>' : (!done && inc.length && !t.depOverride ? '<span class="badge b-notstarted" title="Suggested order only — you can work on this now">Suggested after ' + esc(inc.map(function (d) { return d.id; }).join(', ')) + '</span>' : (!done && t.status !== 'Waiting' && t.status !== 'Blocked' ? '<span class="badge b-complete" title="All prerequisites done">Ready</span>' : ''))) +
       (t.depOverride && !done ? '<span class="badge b-high">Override</span>' : '') + verBadge(t.verification);
     var exp = !!ui.expanded[t.id];
     var cols = o.showPhase ? 9 : 8;
@@ -510,10 +531,12 @@
       if (f.req === 'optional' && t.required) return false;
       if (f.incompleteOnly && isDone(t)) return false;
       if (f.blockedOnly && !isBlocked(t, m)) return false;
+      if (f.readyOnly && !isReady(t, m)) return false;
       if (f.overdueOnly && !isOverdue(t)) return false;
       return true;
     });
     var s = f.sort;
+    if (s === 'recommended') return sortRecommended(list);
     list.sort(function (a, b) {
       if (s === 'deadline') { var x = a.target || '9999-99', y = b.target || '9999-99'; return x < y ? -1 : x > y ? 1 : sortDefault(a, b); }
       if (s === 'priority') return PRI_RANK[a.priority] - PRI_RANK[b.priority] || sortDefault(a, b);
@@ -526,7 +549,7 @@
 
   /* ===================== Views ===================== */
   var NAV = [
-    ['dashboard', 'Dashboard'], ['checklist', 'Master Checklist'], ['heartland', 'Heartland Application', ['P2']], ['setup', 'Business Setup', ['P1', 'P3']],
+    ['dashboard', 'Dashboard'], ['guide', 'Guide — how to use this'], ['checklist', 'Master Checklist'], ['heartland', 'Heartland Application', ['P2']], ['setup', 'Business Setup', ['P1', 'P3']],
     ['compliance', 'Compliance', ['P4']], ['courses', 'Course Catalog', ['P5']], ['pricing', 'Pricing Calculator', ['P6']], ['website', 'Website Launch', ['P7']],
     ['marketing', 'Marketing', ['P8']], ['operations', 'Operations', ['P9']], ['enrollment', 'Student Enrollment', ['P10']], ['growth', 'Growth (optional)', ['P11']],
     ['finance', 'Financial Tracking'], ['schools', 'Charter School Tracker'], ['comms', 'Notes & Communications'], ['documents', 'Documents'],
@@ -556,6 +579,18 @@
     };
   }
 
+  function readyNowCard() {
+    var m = taskMap();
+    var ready = state.tasks.filter(function (t) { return isReady(t, m); });
+    var groups = PHASE_KEYS.map(function (p) { return [p, sortRecommended(ready.filter(function (t) { return t.phase === p; }))]; }).filter(function (g) { return g[1].length; });
+    return '<div class="card"><div class="card-head"><h2>Ready now — work on these in parallel</h2><button class="btn btn-sm" data-action="metric-filter" data-filter="readyOnly">See all ' + ready.length + '</button></div>' +
+      '<p class="small muted">Every task below has its prerequisites done. Do them in any order, across phases, at the same time. ' + (strictMode() ? '' : 'Other tasks aren\'t locked either — prerequisites are only a suggested order.') + '</p>' +
+      (groups.length ? groups.map(function (g, gi) {
+        return '<details' + (gi < 2 ? ' open' : '') + ' style="margin-bottom:.5rem"><summary style="cursor:pointer;font-weight:600">' + esc(SEED.phases[g[0]]) + ' <span class="badge">' + g[1].length + '</span></summary><ul class="next-list" style="margin-top:.5rem">' +
+          g[1].map(function (t) { return '<li><div class="row"><label class="check-row" style="margin:0;flex:1"><input type="checkbox" data-action="toggle" data-id="' + esc(t.id) + '" aria-label="Complete: ' + esc(t.title) + '"> <span><span class="task-id">' + esc(t.id) + '</span> ' + esc(t.title) + '</span></label>' + priBadge(t.priority) + '<button class="btn btn-sm" data-action="open-task" data-id="' + esc(t.id) + '">Details</button></div></li>'; }).join('') + '</ul></details>';
+      }).join('') : '<div class="empty"><strong>Nothing is ready right now.</strong>Check tasks marked Waiting or Blocked.</div>') + '</div>';
+  }
+
   function viewDashboard(el) {
     var s = stats(), next = nextActions(5), top = next[0], m = taskMap(), fc = financeCalc(), f = state.finance;
     var heroNext;
@@ -568,7 +603,8 @@
     var metrics = '<div class="grid grid-metrics">' +
       '<div class="card metric hero"><div class="label">Overall launch progress</div><div class="value">' + pct(s.pct) + '</div>' + bar(s.pct) + '<div class="sub" style="margin-top:.35rem">' + s.done + ' of ' + s.total + ' required tasks · optional tasks excluded (' + s.optDone + '/' + s.optTotal + ' done)</div></div>' +
       metric('Completed', s.done, 'required tasks') + metric('Remaining', s.remaining, 'required tasks') +
-      metric('Blocked', s.blocked, 'waiting on prerequisites or marked Blocked', s.blocked ? 'blockedOnly' : null) + metric('Overdue', s.overdue, 'past target date', s.overdue ? 'overdueOnly' : null, s.overdue > 0) +
+      metric('Ready now', s.ready, 'prerequisites done — work on any of these', 'readyOnly') +
+      metric('Blocked', s.blocked, strictMode() ? 'waiting on prerequisites or marked Blocked' : 'tasks you marked Blocked', s.blocked ? 'blockedOnly' : null) + metric('Overdue', s.overdue, 'past target date', s.overdue ? 'overdueOnly' : null, s.overdue > 0) +
       metric('In progress', s.inProgress, 'tasks', null, false, 'In Progress') + metric('Awaiting external approval', s.waiting, 'status "Waiting"', null, false, 'Waiting') + '</div>';
     var readiness = '<ul class="readiness">' + CAT_LIST.map(function (c, i) {
       var g = groupProgress(function (t) { return t.category === c; });
@@ -594,10 +630,11 @@
       '<dt>Enrolled students · Active courses</dt><dd>' + (f.students || 0) + ' · ' + (f.activeCourses || 0) + '</dd></dl>' +
       (fc.progress != null ? '<div style="margin-top:.5rem">' + bar(Math.min(1, fc.progress), 'ok') + '</div>' : '') + '</div>';
     el.innerHTML = (startupNotice ? '' : '') +
+      (state.settings.guideSeen ? '' : '<div class="card note info" style="margin:0 0 1rem;display:flex;gap:1rem;align-items:center;justify-content:space-between;flex-wrap:wrap"><span><strong>New here?</strong> The step-by-step guide explains how to use this dashboard, what to do first, and how your data is saved.</span><span class="btn-row"><a class="btn btn-primary btn-sm" href="#guide">Open the guide</a><button class="btn btn-sm" data-action="dismiss-welcome">Dismiss</button></span></div>') +
       '<p class="page-intro">Pre-launch command center for an educational services business in Santa Barbara County. Progress is calculated from <strong>required</strong> checklist tasks. Nothing is marked approved, submitted, or earned unless you confirm it.</p>' +
       metrics +
       '<div class="grid dash-main" style="margin-top:1rem"><div class="stack">' + heroNext +
-      '<div class="card"><div class="card-head"><h2>Next actions</h2><span class="small muted">Top 5 actionable, by priority and impact</span></div>' + nextList + '</div>' +
+      '<div class="card"><div class="card-head"><h2>Next actions</h2><span class="small muted">Top 5 actionable, by priority and impact</span></div>' + nextList + '</div>' + readyNowCard() +
       '<div class="card"><div class="card-head"><h2>Business readiness</h2><span class="small muted">Click a category to filter the checklist</span></div>' + readiness + '</div></div>' +
       '<div class="stack">' + fin +
       '<div class="card"><div class="card-head"><h2>Upcoming deadlines</h2></div>' + (upcoming.length ? '<ul class="next-list">' + upcoming.map(function (t) { return '<li><div class="row"><span><span class="task-id">' + esc(t.id) + '</span> ' + esc(t.title) + '</span>' + '<span class="badge ' + (isOverdue(t) ? 'b-overdue' : '') + '">' + fmtDate(t.target) + '</span></div></li>'; }).join('') + '</ul>' : '<div class="empty"><strong>No deadlines set.</strong>Add target dates when you edit tasks.</div>') + '</div>' +
@@ -614,7 +651,7 @@
   /* ---------- Master checklist ---------- */
   function viewChecklist(el) {
     var f = ui.filters;
-    el.innerHTML = '<p class="page-intro">All ' + state.tasks.length + ' tasks across 11 phases. Checking a box runs dependency and evidence checks — opening a resource link never completes a task.</p>' +
+    el.innerHTML = '<p class="page-intro">All ' + state.tasks.length + ' tasks across 11 phases. ' + (strictMode() ? 'Strict mode: completing a task before its prerequisites asks for a reason.' : 'Work in any order — "Suggested after" shows a recommended sequence, not a lock. Use <strong>Ready now</strong> to see everything you can do in parallel, or sort by <strong>Recommended order</strong> to go step by step.') + ' Milestones still require evidence; opening a link never completes a task.</p>' +
       '<div class="card no-print" style="margin-bottom:1rem"><div class="toolbar" role="search">' +
       '<div class="field search"><label for="fq">Search</label><input type="search" id="fq" data-filter="q" value="' + esc(f.q) + '" placeholder="Title, ID, notes…"></div>' +
       '<div class="field"><label for="fphase">Phase</label><select id="fphase" data-filter="phase"><option value="">All phases</option>' + optsKV(PHASE_KEYS.map(function (k) { return [k, SEED.phases[k]]; }), f.phase) + '</select></div>' +
@@ -623,8 +660,8 @@
       '<div class="field"><label for="fst">Status</label><select id="fst" data-filter="status"><option value="">All</option>' + optsKV(STATUSES.map(function (p) { return [p, p]; }), f.status) + '</select></div>' +
       '<div class="field"><label for="freq">Required / optional</label><select id="freq" data-filter="req">' + optsKV([['all', 'All'], ['required', 'Required only'], ['optional', 'Optional only']], f.req) + '</select></div>' +
       '<div class="field"><label for="fver">Evidence label</label><select id="fver" data-filter="verification"><option value="">All</option>' + optsKV(VERIF.map(function (p) { return [p, p]; }), f.verification) + '</select></div>' +
-      '<div class="field"><label for="fsort">Sort by</label><select id="fsort" data-filter="sort">' + optsKV([['default', 'Phase order'], ['deadline', 'Deadline'], ['priority', 'Priority'], ['effort', 'Effort (low → high)'], ['effort-desc', 'Effort (high → low)']], f.sort) + '</select></div>' +
-      '<div class="toggles"><label><input type="checkbox" data-filter="incompleteOnly"' + (f.incompleteOnly ? ' checked' : '') + '> Show incomplete tasks only</label><label><input type="checkbox" data-filter="blockedOnly"' + (f.blockedOnly ? ' checked' : '') + '> Show blocked tasks</label><label><input type="checkbox" data-filter="overdueOnly"' + (f.overdueOnly ? ' checked' : '') + '> Overdue only</label></div>' +
+      '<div class="field"><label for="fsort">Sort by</label><select id="fsort" data-filter="sort">' + optsKV([['default', 'Phase order'], ['recommended', 'Recommended order'], ['deadline', 'Deadline'], ['priority', 'Priority'], ['effort', 'Effort (low → high)'], ['effort-desc', 'Effort (high → low)']], f.sort) + '</select></div>' +
+      '<div class="toggles"><label><input type="checkbox" data-filter="readyOnly"' + (f.readyOnly ? ' checked' : '') + '> Ready now</label><label><input type="checkbox" data-filter="incompleteOnly"' + (f.incompleteOnly ? ' checked' : '') + '> Show incomplete tasks only</label><label><input type="checkbox" data-filter="blockedOnly"' + (f.blockedOnly ? ' checked' : '') + '> Show blocked tasks</label><label><input type="checkbox" data-filter="overdueOnly"' + (f.overdueOnly ? ' checked' : '') + '> Overdue only</label></div>' +
       '</div><div class="btn-row"><button class="btn btn-primary" data-action="new-task">+ Add task</button><button class="btn" data-action="clear-filters">Clear filters</button><button class="btn" data-action="print-checklist">Print checklist</button></div></div>' +
       '<div id="taskResults"></div>';
     renderResults();
@@ -959,6 +996,132 @@
       }).join('');
   }
 
+  /* ---------- Guide ---------- */
+  var GUIDE_SECTIONS = [
+    ['g-start', 'Start here: your first 15 minutes'],
+    ['g-daily', 'Your weekly routine'],
+    ['g-order', 'Order vs. doing things in parallel'],
+    ['g-task', 'Working a single task'],
+    ['g-labels', 'What the evidence labels mean'],
+    ['g-milestones', 'Milestones that need proof'],
+    ['g-pages', 'What each page is for'],
+    ['g-heartland', 'Heartland: the path to your first payment'],
+    ['g-money', 'Money: actual vs. projected'],
+    ['g-data', 'Saving, backups, and devices'],
+    ['g-update', 'Updating your live site on GitHub'],
+    ['g-faq', 'Quick answers']
+  ];
+  function viewGuide(el) {
+    var tLink = function (id) { var t = getTask(id); return '<button class="btn btn-sm btn-ghost" data-action="open-task" data-id="' + id + '" style="padding:.1rem .35rem;min-height:0">' + id + (t ? ' — ' + esc(t.title) : '') + '</button>'; };
+    var go = function (view, label) { return '<a href="#' + view + '">' + esc(label) + '</a>'; };
+    var sec = function (id, title, body) { return '<section class="card guide-sec" id="' + id + '" tabindex="-1"><h2>' + esc(title) + '</h2>' + body + '<p class="small" style="margin:.75rem 0 0"><button class="btn btn-sm btn-ghost" data-action="guide-top">↑ Back to contents</button></p></section>'; };
+    var s = stats();
+    el.innerHTML = '<div class="guide">' +
+      '<div class="card next-hero"><div class="kicker">How to use this dashboard</div><h2>One place to go from idea to first paid student</h2>' +
+      '<p>This dashboard holds every step for launching your creative technology courses and getting approved as a Heartland vendor, from setting up the business to receiving your first payment. Right now you have <strong>' + s.remaining + ' required tasks</strong> left and <strong>' + s.ready + ' ready to start</strong>.</p>' +
+      '<p class="small muted" style="margin:0">Short version: open the <a href="#dashboard">Dashboard</a>, do what "What should I do next?" says (or anything in "Ready now"), check it off, and repeat. Everything saves automatically.</p></div>' +
+      '<nav class="card" aria-label="Guide contents" id="g-toc"><h2>Contents</h2><ol class="guide-toc">' + GUIDE_SECTIONS.map(function (g) { return '<li><button class="btn btn-ghost btn-sm" data-action="guide-jump" data-target="' + g[0] + '">' + esc(g[1]) + '</button></li>'; }).join('') + '</ol></nav>' +
+
+      sec('g-start', 'Start here: your first 15 minutes', '<ol class="guide-steps">' +
+        '<li><strong>Bookmark this page.</strong> Your progress lives in this browser on this device (see "Saving, backups, and devices").</li>' +
+        '<li><strong>Set your details.</strong> In ' + go('settings', 'Settings & Backup') + ', change the business name if you have one. "Creative Technology Academy" is only a working title.</li>' +
+        '<li><strong>Do the first task.</strong> ' + tLink('P1-01') + ': write a short description of the business in the task\'s Notes, then check it off.</li>' +
+        '<li><strong>Start the Heartland research.</strong> ' + tLink('P2-01') + ': open the official page from the task, read it, and write down what it requires and today\'s date in Notes.</li>' +
+        '<li><strong>Draft your inquiry email.</strong> Go to ' + go('documents', 'Documents') + ' → "Vendor inquiry email" → Create draft. Fill in the [brackets], copy it, and send it from your own email. Then log it in ' + go('comms', 'Notes & Communications') + ' and check off ' + tLink('P2-04') + '.</li>' +
+        '<li><strong>Export a backup.</strong> ' + go('settings', 'Settings & Backup') + ' → Export JSON backup. Do this every week or so.</li></ol>') +
+
+      sec('g-daily', 'Your weekly routine', '<ol class="guide-steps">' +
+        '<li>Open the ' + go('dashboard', 'Dashboard') + '. Look at <em>What should I do next?</em> and <em>Ready now</em>.</li>' +
+        '<li>Pick 3–5 tasks. Set each one\'s status to <strong>In Progress</strong> so they show up together.</li>' +
+        '<li>Work on them, and put what you learned in each task\'s <strong>Notes</strong>: names, dates, answers, links.</li>' +
+        '<li>Check off tasks once you meet their <strong>Done when</strong> criteria.</li>' +
+        '<li>If you\'re waiting on someone else (Heartland, an insurer), set the status to <strong>Waiting</strong> and add a follow-up date in the ' + go('schools', 'Charter School Tracker') + ' or the communication log.</li>' +
+        '<li>At the end of the week, export a backup.</li></ol>') +
+
+      sec('g-order', 'Order vs. doing things in parallel', '<p>You do <strong>not</strong> have to finish things in order. You\'re in <strong>' + (strictMode() ? 'Strict' : 'Flexible') + ' mode</strong>. ' + (strictMode() ? 'Completing a task early asks you for a reason, which is recorded.' : 'You can check off any task at any time.') + '</p>' +
+        '<ul><li><span class="badge b-complete">Ready</span> All of its earlier steps are done. Start it now.</li>' +
+        '<li><span class="badge b-notstarted">Suggested after P2-04</span> There\'s a recommended earlier step, but nothing stops you from working on this now.</li>' +
+        '<li><strong>Ready now</strong> (on the Dashboard, and as a filter in the Master Checklist) lists everything you can work on at the same time, across all phases.</li>' +
+        '<li>Want to go step by step instead? In the ' + go('checklist', 'Master Checklist') + ', choose <em>Sort by → Recommended order</em>.</li>' +
+        '<li>To require a reason for skipping ahead, change <em>Dependency mode</em> to Strict in ' + go('settings', 'Settings') + '.</li></ul>') +
+
+      sec('g-task', 'Working a single task', '<ul>' +
+        '<li><strong>Details</strong> opens the instructions, the "Done when" criteria, the official link, Notes, and history.</li>' +
+        '<li><strong>Checkbox or status</strong> marks it complete. Uncheck it, or click <em>Reopen task</em>, to undo.</li>' +
+        '<li><strong>Edit</strong> lets you set a target date, change the priority, make the task optional, track hours, or change its earlier steps.</li>' +
+        '<li><strong>+ Add task</strong> (Master Checklist or any phase page) adds your own tasks.</li>' +
+        '<li>Overdue tasks get a red edge and an <span class="badge b-overdue">Overdue</span> badge.</li>' +
+        '<li>Optional tasks (like Growth) don\'t count toward your launch percentage.</li></ul>') +
+
+      sec('g-labels', 'What the evidence labels mean', '<p>Every requirement carries a label so you always know what\'s confirmed and what\'s still a guess.</p><ul>' +
+        '<li>' + verBadge('Verify Current Requirements') + ': plausible, but not yet confirmed. Most Heartland and government items start here.</li>' +
+        '<li>' + verBadge('Verified Current') + ': you confirmed it from a current official page or in writing. The app requires a source and a date.</li>' +
+        '<li>' + verBadge('User Confirmed') + ': something you personally did or confirmed.</li>' +
+        '<li>' + verBadge('Planning Assumption') + ': a number or choice you\'re using for planning. It\'s not a fact.</li>' +
+        '<li>' + verBadge('Internal Task') + ': your own decision or work, with nothing to verify externally.</li></ul>' +
+        '<p class="small">To upgrade a label: Edit the task → Verification status → enter the official URL (or "Email from vendor dept") and the date.</p>') +
+
+      sec('g-milestones', 'Milestones that need proof', '<p>A few tasks ask you to tick confirmation boxes and describe your evidence before they can be checked off. This keeps the dashboard honest:</p><ul>' +
+        '<li>' + tLink('P2-18') + '</li><li>' + tLink('P2-24') + '</li><li>' + tLink('P4-05') + '</li><li>' + tLink('P10-08') + '</li><li>' + tLink('P10-10') + '</li><li>' + tLink('P10-11') + '</li><li>' + tLink('P10-17') + '</li></ul>' +
+        '<p class="small">Interest from a parent, a sent email, or a pending order never counts as a milestone. The ' + go('enrollment', 'Student Enrollment') + ' page has the "First paid student" button.</p>') +
+
+      sec('g-pages', 'What each page is for', '<dl class="kv guide-pages">' +
+        [['dashboard', 'Dashboard', 'Progress, what to do next, Ready now, money summary.'],
+         ['checklist', 'Master Checklist', 'All tasks: search, filter, sort, print.'],
+         ['heartland', 'Heartland Application', 'Phase 2 tasks, application status, official links, inquiry email.'],
+         ['setup', 'Business Setup', 'Business model research plus registration and taxes (Phases 1 & 3).'],
+         ['compliance', 'Compliance', 'Background checks, insurance, student safety and privacy.'],
+         ['courses', 'Course Catalog', 'Your 14 proposed courses; flag 2–4 launch candidates and build lessons.'],
+         ['pricing', 'Pricing Calculator', 'Compare lesson, group, course, monthly and online pricing.'],
+         ['website', 'Website Launch', 'Steps to build an accurate business website.'],
+         ['marketing', 'Marketing', 'Outreach tasks and an inquiry counter (numbers only).'],
+         ['operations', 'Operations', 'Scheduling, attendance, invoicing systems.'],
+         ['enrollment', 'Student Enrollment', 'Order → authorization → teach → invoice → paid.'],
+         ['growth', 'Growth (optional)', 'After your first paid student.'],
+         ['finance', 'Financial Tracking', 'Your real numbers and a ledger.'],
+         ['schools', 'Charter School Tracker', 'One row per school you apply to.'],
+         ['comms', 'Notes & Communications', 'Log every email/call; free-form notes.'],
+         ['documents', 'Documents', 'Draft emails, bios, descriptions from templates.'],
+         ['resources', 'Resource Library', 'Official links, grouped by type.'],
+         ['settings', 'Settings & Backup', 'Name, dependency mode, backup/restore, reset.']].map(function (p) { return '<dt>' + go(p[0], p[1]) + '</dt><dd>' + esc(p[2]) + '</dd>'; }).join('') + '</dl>') +
+
+      sec('g-heartland', 'Heartland: the path to your first payment', '<ol class="guide-steps">' +
+        '<li><strong>Research:</strong> read the official pages (' + tLink('P2-01') + ', ' + tLink('P2-02') + ').</li>' +
+        '<li><strong>Ask:</strong> send the inquiry email with all your questions in one message (' + tLink('P2-04') + '). Each answer completes several tasks in Phases 2, 4 and 6.</li>' +
+        '<li><strong>Prepare:</strong> bio, résumé, course descriptions, prices, website (P2-12 to P2-17).</li>' +
+        '<li><strong>Apply:</strong> submit it yourself, then record the date and reference number in the ' + go('schools', 'tracker') + '.</li>' +
+        '<li><strong>Get approved:</strong> answer follow-ups, sign the agreement, finish onboarding, check your catalog listing.</li>' +
+        '<li><strong>Teach and get paid:</strong> follow the ' + go('enrollment', 'Student Enrollment') + ' steps in order. Never teach before the authorization exists.</li></ol>' +
+        '<div class="note warn">Nothing in this app is a verified Heartland rule until you confirm it. Funding amounts, pricing limits and payment timelines must come from Heartland directly.</div>') +
+
+      sec('g-money', 'Money: actual vs. projected', '<ul>' +
+        '<li>' + go('finance', 'Financial Tracking') + ' is for <span class="badge b-actual">ACTUAL</span> money that has really been spent or received.</li>' +
+        '<li>The ' + go('pricing', 'Pricing Calculator') + ' shows <span class="badge b-projected">HYPOTHETICAL</span> scenarios. Its starting numbers are examples, so replace them once Heartland confirms its rules.</li>' +
+        '<li>Use the ledger for each expense or payment. "Fill from ledger actuals" copies the totals into the overview.</li></ul>') +
+
+      sec('g-data', 'Saving, backups, and devices', '<ul>' +
+        '<li>Everything saves automatically. Look for <span class="save-indicator" style="display:inline">Saved locally</span> at the top.</li>' +
+        '<li>Data is stored <strong>in this browser on this device only</strong>. Your phone, a different browser, or private mode each start empty.</li>' +
+        '<li><strong>Move your progress:</strong> Export a backup here, then Import it on the other device or browser (' + go('settings', 'Settings & Backup') + ').</li>' +
+        '<li>Clearing your browser data erases your progress. Export backups regularly.</li>' +
+        '<li>Your live link is public, but your checkmarks and notes are not. They never leave your browser.</li>' +
+        '<li>Never enter passwords, Social Security or tax ID numbers, ID documents, or student information.</li></ul>') +
+
+      sec('g-update', 'Updating your live site on GitHub', '<ol class="guide-steps">' +
+        '<li>Open <a href="https://github.com/palmtreefeen/cta-launch-dashboard/upload/main" target="_blank" rel="noopener noreferrer">your repo\'s upload page ↗</a>.</li>' +
+        '<li>Click <strong>choose your files</strong>, select the updated files (for example from Documents → cta-launch-dashboard), and click <strong>Commit changes</strong>.</li>' +
+        '<li>Wait about a minute, then refresh the site. Your saved progress stays.</li></ol>') +
+
+      sec('g-faq', 'Quick answers', '<dl class="guide-faq">' +
+        '<dt>I checked something by mistake.</dt><dd>Uncheck it, or open Details → Reopen task.</dd>' +
+        '<dt>A task doesn\'t apply to me.</dt><dd>Edit it → set "Optional" (it stops counting toward launch %), or delete it. Settings → "Restore deleted default tasks" brings deleted ones back.</dd>' +
+        '<dt>Why does progress say 0% after I did something?</dt><dd>Only <em>required</em> tasks count, and only when checked complete.</dd>' +
+        '<dt>Does the app send emails or submit my application?</dt><dd>No. It only drafts. You send and submit everything yourself.</dd>' +
+        '<dt>How do I print?</dt><dd>Master Checklist → Print checklist, or the "Print view" button at the top of any page.</dd>' +
+        '<dt>I want to start over.</dt><dd>Settings & Backup → Reset application (export first if you might want it back).</dd></dl>') +
+      '</div>';
+  }
+
   /* ---------- Settings ---------- */
   function viewSettings(el) {
     var size = 0; try { size = (localStorage.getItem(STORAGE_KEY) || '').length; } catch (e) { }
@@ -966,6 +1129,7 @@
       '<div class="card"><h2>Where your data lives</h2><p><strong>' + (storageOK ? 'Saved locally in this browser.' : 'Browser storage unavailable — changes will be lost when you close the page.') + '</strong></p><ul class="small"><li>Data is stored with localStorage on this device, in this browser only. It does not sync to other browsers or devices.</li><li>Clearing browser data, using private browsing, or some browser cleanup tools will erase it.</li><li>Export a JSON backup regularly and keep it somewhere safe.</li><li>Never store passwords, Social Security numbers, identity documents, student records, or payment credentials here.</li></ul>' +
       '<dl class="kv"><dt>Last updated</dt><dd>' + fmtDateTime(state.lastUpdated) + '</dd><dt>Created</dt><dd>' + fmtDateTime(state.created) + '</dd><dt>Data version</dt><dd>' + state.version + '</dd><dt>Stored size</dt><dd>' + (size / 1024).toFixed(1) + ' KB</dd><dt>Tasks</dt><dd>' + state.tasks.length + '</dd></dl></div></div>' +
       '<div class="stack"><div class="card"><h2>Backup &amp; restore</h2><p class="small">Export downloads a JSON file containing everything in this dashboard. Import replaces current data after validation and confirmation.</p><div class="btn-row"><button class="btn btn-primary" data-action="export">Export JSON backup</button><label class="btn" for="importFile" style="margin:0">Import JSON backup…</label><input type="file" id="importFile" accept="application/json,.json" class="sr-only"></div><div id="importMsg" role="alert" class="small" style="margin-top:.6rem"></div></div>' +
+      '<div class="card"><h2>How tasks unlock</h2><div class="field"><label for="s_dep">Dependency mode</label><select id="s_dep" data-bind="settings.depMode" data-rerender="1">' + optsKV([['flexible', 'Flexible — work on anything, in any order'], ['strict', 'Strict — confirm and give a reason before skipping ahead']], state.settings.depMode) + '</select><div class="hint">Flexible: prerequisites are shown as a suggested order, and you can check off any task at any time (the app notes it in the task history). Evidence checks on milestones like Heartland approval and first paid student always apply.</div></div></div>' +
       '<div class="card"><h2>Print</h2><div class="btn-row"><button class="btn" data-action="print-checklist">Print full checklist</button><button class="btn" data-action="print-dashboard">Print dashboard</button></div></div>' +
       '<div class="card"><h2>Maintenance</h2><p class="small">Restore any default tasks you deleted (your edited tasks are untouched).</p><div class="btn-row"><button class="btn" data-action="restore-defaults">Restore deleted default tasks</button></div>' +
       '<hr style="border:none;border-top:1px solid var(--border);margin:1rem 0"><h3 class="neg">Danger zone</h3><p class="small">Reset erases all progress, notes, courses, logs, and documents in this browser and reloads the default checklist.</p><button class="btn btn-danger-solid" data-action="reset">Reset application…</button></div></div></div>';
@@ -1019,7 +1183,7 @@
 
   /* ===================== Router ===================== */
   var VIEWS = {
-    dashboard: viewDashboard, checklist: viewChecklist,
+    dashboard: viewDashboard, guide: viewGuide, checklist: viewChecklist,
     heartland: viewPhase('heartland', ['P2'], heartlandTop), setup: viewPhase('setup', ['P1', 'P3']), compliance: viewPhase('compliance', ['P4']),
     courses: viewPhase('courses', ['P5'], courseTop), pricing: viewPhase('pricing', ['P6'], pricingTop), website: viewPhase('website', ['P7']),
     marketing: viewPhase('marketing', ['P8'], null, marketingBottom), operations: viewPhase('operations', ['P9']), enrollment: viewPhase('enrollment', ['P10'], enrollmentTop), growth: viewPhase('growth', ['P11']),
@@ -1069,6 +1233,9 @@
       case 'phase-in-checklist': resetFilters(); ui.filters.phase = el.dataset.phase; go('checklist'); break;
       case 'clear-filters': resetFilters(); render(); break;
       case 'print-checklist': printChecklist(); break;
+      case 'guide-jump': var gt = document.getElementById(el.dataset.target); if (gt) { gt.scrollIntoView({ behavior: 'smooth', block: 'start' }); gt.focus({ preventScroll: true }); } break;
+      case 'guide-top': var toc = document.getElementById('g-toc'); if (toc) toc.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
+      case 'dismiss-welcome': state.settings.guideSeen = true; save(); render(); break;
       case 'print-dashboard': go('dashboard'); setTimeout(function () { window.print(); }, 100); break;
       case 'select-course': ui.course = +el.dataset.i; render(); break;
       case 'new-course': newCourse(); break;
@@ -1132,7 +1299,7 @@
     if (/^settings\.businessName/.test(b)) $('#brandName').textContent = state.settings.businessName || 'Launch Dashboard';
   }
   function clearBanner() { startupNotice = null; var bn = $('#banner'); bn.hidden = true; bn.textContent = ''; }
-  function resetFilters() { ui.filters = { q: '', phase: '', category: '', priority: '', status: '', req: 'all', verification: '', incompleteOnly: false, blockedOnly: false, overdueOnly: false, sort: 'default' }; }
+  function resetFilters() { ui.filters = { q: '', phase: '', category: '', priority: '', status: '', req: 'all', verification: '', incompleteOnly: false, blockedOnly: false, readyOnly: false, overdueOnly: false, sort: 'default' }; }
 
   /* ---------- Course helpers ---------- */
   function newCourse() {
